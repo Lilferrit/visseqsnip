@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools", "wheel", "setuptools_scm[toml]"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visseqsnip"
+version = "0.1.0"
+license = {text = "Apache 2.0"}
+authors = [
+    {name = "Gwenneth Straub", email = "gwenneth.straub@gmail.com"},
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+requires-python = ">=3.12"
+
+dependencies = [
+    "tifffile",
+    "tqdm",
+    "fire",
+    "numpy",
+    "pandas",
+    "Pillow", 
+    "webdataset"
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "pytest",
+    "isort",
+]
+
+[project.scripts]
+# Map CLI command names to their entry point functions
+visseq-webdataset = "visseqsnip.make_webdataset:main"
+
+[tool.setuptools]
+packages = ["visseqsnip"]
+# Or use find directive for automatic discovery:
+# packages = { find = {} }
