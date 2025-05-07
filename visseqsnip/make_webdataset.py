@@ -153,6 +153,7 @@ def make_dataset(
         for curr_image_path in image_file_paths:
             cell_df_filtered = cell_df[cell_df["file_path"] == curr_image_path]
             curr_image_path = pathlib.Path(curr_image_path)
+            curr_image_path = curr_image_path.parent / "cell_images_100.tif"
 
             if adjust_path:
                 adjusted_path = str(curr_image_path).replace("phenotyping/output/", "")
