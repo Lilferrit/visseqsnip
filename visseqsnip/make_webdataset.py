@@ -50,20 +50,13 @@ def _process_image_path(
     for _, row in cells_table.iterrows():
         sample_idx = int(row["file_row_index"])
         curr_sample = {"__key__": f"{curr_dataset_idx:010d}"}
-
-        row_meta_data = row.to_json()
-        meta_data_buffer = io.BytesIO(row_meta_data.encode("utf-8"))
-        curr_sample["meta_data.json"] = meta_data_buffer
+        curr_sample["meta_data.json"] = row.to_dict()
         curr_image = im_data[sample_idx]
 
         for channel_name, channel_idx in CHANNELS.items():
             curr_channel_data = curr_image[channel_idx]
-            curr_channel_data = PIL.Image.fromarray(curr_channel_data)
-
-            curr_channel_buff = io.BytesIO()
-            curr_channel_data.save(curr_channel_buff, format="PNG")
-            curr_channel_buff.seek(0)
-            curr_sample[f"{channel_name}.png"] = curr_channel_buff
+            curr_channel_data = PIL.Image.fromarray(curr_channel_data).convert("L")
+            curr_sample[f"{channel_name}.png"] = curr_channel_data
 
         sink.write(curr_sample)
         curr_dataset_idx += 1

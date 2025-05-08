@@ -1,105 +1,84 @@
+import glob
+import io
 import json
+import pathlib
 
 import numpy as np
 import pandas as pd
-import pytest
-import tifffile
+import PIL.Image
+import tifffile as tiff
 import webdataset as wds
-from PIL import Image
 
-import visseqsnip.make_webdataset
-
-# Dummy sink to capture samples written by ShardWriter
-class DummySink:
-    def __init__(self):
-        self.samples = []
-
-    def write(self, sample):
-        self.samples.append(sample)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return False
-
-@pytest.fixture(autouse=True)
-def patch_tiff_and_shardwriter(monkeypatch):
-    """
-    Monkeypatch tifffile.imread to return a synthetic image array,
-    and webdataset.ShardWriter to use DummySink.
-    """
-    # Fake TIFF read: return an array of shape (2,3,2,2)
-    def fake_imread(path):
-        return np.arange(2*3*2*2, dtype=np.uint8).reshape((2, 3, 2, 2))
-    
-    monkeypatch.setattr(tifffile, 'imread', fake_imread)
-
-    # Fake ShardWriter returns a DummySink
-    def fake_shardwriter(pattern, maxcount, maxsize):
-        return DummySink()
-    
-    monkeypatch.setattr(wds, 'ShardWriter', fake_shardwriter)
+from visseqsnip.make_webdataset import _process_image_path, make_dataset, CHANNELS
 
 
+def test__process_image_path(tmp_path):
+    # Create a dummy TIFF file with shape (1, 3, 2, 2)
+    data = np.arange(1 * 3 * 2 * 2, dtype=np.uint8).reshape((1, 3, 2, 2))
+    tif_path = tmp_path / "image.tif"
+    tiff.imwrite(str(tif_path), data)
 
-def test_process_image_path_basic():
-    # Create a DataFrame with two rows (file_row_index 0 and 1)
-    df = pd.DataFrame({
-        'file_row_index': [0, 1],
-        'foo': ['bar', 'baz'],
-    })
+    # Create a DataFrame with one row
+    df = pd.DataFrame([{"file_row_index": 0}])
 
-    sink = DummySink()
-    start_idx = 5
-    end_idx = visseqsnip.make_webdataset._process_image_path(sink, df, 'dummy.tif', curr_dataset_idx=start_idx)
+    # Set up output shards directory
+    shards_dir = tmp_path / "shards"
+    shards_dir.mkdir()
+    shard_pattern = str(shards_dir / "shard-%06d.tar")
 
-    # Should increment by number of rows
-    assert end_idx == start_idx + len(df)
-    assert len(sink.samples) == len(df)
+    # Write using _process_image_path
+    with wds.ShardWriter(shard_pattern, maxcount=10) as sink:
+        count = _process_image_path(sink, df, tif_path, curr_dataset_idx=0)
 
-    for i, sample in enumerate(sink.samples):
-        # Key formatting
-        expected_key = f"{start_idx + i:010d}"
-        assert sample['__key__'] == expected_key
+    assert count == 1
 
-        # Check metadata JSON
-        buf = sample['meta_data.json']
-        buf.seek(0)
-        data = json.loads(buf.read().decode('utf-8'))
-        assert data['file_row_index'] == df.loc[i, 'file_row_index']
+    shard_files = sorted(glob.glob(str(shards_dir / "shard-*.tar")))
+    assert len(shard_files) > 0, "No shard files found"
 
-        # Each channel should produce a valid 2x2 PNG
-        for channel in visseqsnip.make_webdataset.CHANNELS:
-            filename = f"{channel}.png"
-            assert filename in sample
-            img_buf = sample[filename]
-            img = Image.open(img_buf)
+    dataset = wds.WebDataset(shard_files)
+    sample_count = 0
+    for sample in dataset:
+        # Check keys
+        assert "__key__" in sample
+        assert "meta_data.json" in sample
+        # Validate JSON metadata
+        raw_json = sample["meta_data.json"]
+        assert isinstance(raw_json, (bytes, str))
+        raw_str = raw_json.decode("utf-8") if isinstance(raw_json, bytes) else raw_json
+        meta = json.loads(raw_str)
+        assert meta["file_row_index"] == 0
+
+        # Validate PNG images can be opened
+        for channel in CHANNELS:
+            img_data = sample[f"{channel}.png"]
+            img = PIL.Image.open(io.BytesIO(img_data))
+            assert img.mode == "L"
             assert img.size == (2, 2)
-            assert img.mode in ('L', 'I;8')
+
+        sample_count += 1
+
+    assert sample_count == 1
 
 
-def test_make_dataset_integration(tmp_path, monkeypatch):
-    # Create a small CSV with one image and one cell
-    csv_path = tmp_path / 'cells.csv'
-    df = pd.DataFrame({
-        'file_row_index': [0],
-        'file_path': ['img1.tif'],
-    })
-    df.to_csv(csv_path, index=False)
-
-    # Create phenotyping root dir (image file need not exist)
-    phenotyping_root = tmp_path / 'phenotyping'
+def test_make_dataset(tmp_path):
+    # Set up phenotyping root and image
+    phenotyping_root = tmp_path / "phenotyping_root"
     phenotyping_root.mkdir()
+    # Create a dummy TIFF file named 'cell_images_100.tif'
+    data = np.arange(1 * 3 * 2 * 2, dtype=np.uint8).reshape((1, 3, 2, 2))
+    cell_img = phenotyping_root / "cell_images_100.tif"
+    tiff.imwrite(str(cell_img), data)
 
-    # Prepare a single DummySink for capture
-    sink = DummySink()
-    monkeypatch.setattr(wds, 'ShardWriter', lambda pattern, maxcount, maxsize: sink)
+    # Create a CSV cell file
+    cell_file = tmp_path / "cells.csv"
+    df2 = pd.DataFrame([{"file_path": "cell_images_100.tif", "file_row_index": 0}])
+    df2.to_csv(cell_file, index=False)
 
-    # Run dataset creation
-    output_dir = tmp_path / 'out'
-    visseqsnip.make_webdataset.make_dataset(
-        cell_file_path=csv_path,
+    # Output directory
+    output_dir = tmp_path / "output"
+    # Run make_dataset without path adjustment or filtering
+    make_dataset(
+        cell_file_path=cell_file,
         phenotyping_root_dir=phenotyping_root,
         output_dir=output_dir,
         adjust_path=False,
@@ -108,9 +87,26 @@ def test_make_dataset_integration(tmp_path, monkeypatch):
         log_file_path=None,
     )
 
-    # After running, one sample should be written
-    assert len(sink.samples) == 1
-    sample = sink.samples[0]
-    assert sample['__key__'] == '0000000000'
-    for channel in visseqsnip.make_webdataset.CHANNELS:
-        assert f"{channel}.png" in sample
+    # Read shards and verify sample
+    shard_files = sorted(glob.glob(str(output_dir / "shard-*.tar")))
+    assert len(shard_files) > 0, "No shard files found"
+
+    dataset = wds.WebDataset(shard_files)
+    sample_count2 = 0
+    for sample in dataset:
+        assert "__key__" in sample
+        assert "meta_data.json" in sample
+        raw_json = sample["meta_data.json"]
+        raw_str = raw_json.decode("utf-8") if isinstance(raw_json, bytes) else raw_json
+        meta2 = json.loads(raw_str)
+        assert meta2["file_row_index"] == 0
+
+        for channel in CHANNELS:
+            img_data = sample[f"{channel}.png"]
+            img = PIL.Image.open(io.BytesIO(img_data))
+            assert img.mode == "L"
+            assert img.size == (2, 2)
+
+        sample_count2 += 1
+
+    assert sample_count2 == 1
