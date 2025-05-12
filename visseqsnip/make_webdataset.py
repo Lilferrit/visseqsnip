@@ -12,11 +12,13 @@ import tifffile as tiff
 import tqdm
 import webdataset as wds
 
-CHANNELS = {
+IMAGE_CHANNELS = {
     "nucleus": 0,
     "target_protein": 1,
     "cytoplasm": 2,
 }
+
+MASK_CHANNELS = {"cell": 0, "nuclear": 1}
 
 
 def _process_image_path(
@@ -25,6 +27,9 @@ def _process_image_path(
     tif_image_path: str | pathlib.Path,
     curr_dataset_idx: int,
     pbar: Optional[tqdm.tqdm] = None,
+    filter_edit_distance: Optional[int] = 1,
+    min_barcodes: Optional[int] = 5,
+    mask_file_path: Optional[str | pathlib.Path] = None,
 ) -> int:
     """
     Processes a single multi-channel TIFF image and writes WebDataset samples.
@@ -40,29 +45,72 @@ def _process_image_path(
             Running sample index to use as the WebDataset key.
         pbar (Optional[tqdm.tqdm]):
             Progress bar to update after each sample (optional).
-
+        filter_edit_distance (Optional[int]):
+            Maximum edit sample distance, set to None for no filter
+        min_barcodes (Optional[int]):
+            Minimum number of valid barcodes, set to None for no filter
+        mask_file_path (Optional[str | pathlib.Path]):
+            Mask image file path, if not None mask images will be added to
+            the webdataset.
+        
     Returns:
         int: Updated dataset index after processing all rows in `cells_table`.
     """
     im_data = tiff.imread(tif_image_path)
     im_data = np.asarray(im_data)
 
+    if mask_file_path is not None:
+        mask_data = tiff.imread(mask_file_path)
+        mask_data = np.asarray(mask_data, dtype=np.bool)
+    else:
+        mask_data = None
+
+    if im_data.dtype != np.uint16:
+        im_data = im_data.astype(np.uint16)
+
     for _, row in cells_table.iterrows():
+        if pbar is not None:
+            pbar.update()
+
+        if (
+            filter_edit_distance is not None
+            and row["editDistance"] > filter_edit_distance
+        ):
+            continue
+
+        if min_barcodes is not None:
+            num_barcodes = sum(
+                [
+                    "?" not in row[barcode_idx] and "!" not in row[barcode_idx]
+                    for barcode_idx in cells_table.columns
+                    if barcode_idx.startswith("barcode")
+                ]
+            )
+
+            if num_barcodes < min_barcodes:
+                continue
+
         sample_idx = int(row["file_row_index"])
         curr_sample = {"__key__": f"{curr_dataset_idx:010d}"}
         curr_sample["meta_data.json"] = row.to_dict()
         curr_image = im_data[sample_idx]
 
-        for channel_name, channel_idx in CHANNELS.items():
+        for channel_name, channel_idx in IMAGE_CHANNELS.items():
             curr_channel_data = curr_image[channel_idx]
-            curr_channel_data = PIL.Image.fromarray(curr_channel_data).convert("L")
-            curr_sample[f"{channel_name}.png"] = curr_channel_data
+            curr_sample[f"{channel_name}.png"] = PIL.Image.fromarray(
+                curr_channel_data, mode="I;16"
+            )
+
+        if mask_data is not None:
+            curr_mask = mask_data[sample_idx]
+            for channel_name, channel_idx in MASK_CHANNELS.items():
+                curr_channel_data = curr_mask[channel_idx]
+                curr_sample[f"{channel_name}_mask.png"] = PIL.Image.fromarray(
+                    curr_channel_data, mode="1"
+                )
 
         sink.write(curr_sample)
         curr_dataset_idx += 1
-
-        if pbar is not None:
-            pbar.update()
 
     return curr_dataset_idx
 
@@ -73,8 +121,9 @@ def make_dataset(
     output_dir: str | pathlib.Path,
     adjust_path: bool = True,
     filter_cell_profiler: bool = True,
-    n_shards: int = 20,
+    n_shards: int = 10,
     log_file_path: Optional[str | pathlib.Path] = None,
+    add_masks: bool = True,
 ) -> None:
     """
     Converts cell metadata and TIFF images into a WebDataset shard archive.
@@ -96,6 +145,8 @@ def make_dataset(
             Whether to drop columns that start with uppercase (CellProfiler).
         n_shards (int):
             Number of shards to split the dataset into.
+        add_mask (bool):
+            Whether to add mask images to webdatset
     """
     logging.basicConfig(
         filename=log_file_path,
@@ -154,6 +205,11 @@ def make_dataset(
 
             full_image_path = phenotyping_root_dir / curr_image_path
             logging.info("Processing image: %s", str(full_image_path))
+            mask_file_path = (
+                None
+                if add_masks is False
+                else full_image_path.parent / "mask_images_100.tif"
+            )
 
             curr_dataset_idx = _process_image_path(
                 sink,
@@ -161,6 +217,7 @@ def make_dataset(
                 full_image_path,
                 curr_dataset_idx,
                 pbar=pbar,
+                mask_file_path=mask_file_path
             )
 
 

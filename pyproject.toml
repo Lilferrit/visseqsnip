@@ -17,7 +17,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 
 dependencies = [
     "tifffile",
@@ -30,10 +30,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+parquet = [
+    "pyarrow",
+]
+
 dev = [
     "black",
     "pytest",
     "isort",
+    "pyarrow",
 ]
 
 [project.scripts]
