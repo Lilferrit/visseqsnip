@@ -2,7 +2,7 @@ import io
 import logging
 import math
 import pathlib
-from typing import Optional
+from typing import Optional, Tuple
 
 import fire
 import numpy as np
@@ -30,7 +30,7 @@ def _process_image_path(
     filter_edit_distance: Optional[int] = 1,
     min_barcodes: Optional[int] = 5,
     mask_file_path: Optional[str | pathlib.Path] = None,
-) -> int:
+) -> Tuple[int, int]:
     """
     Processes a single multi-channel TIFF image and writes WebDataset samples.
 
@@ -52,22 +52,18 @@ def _process_image_path(
         mask_file_path (Optional[str | pathlib.Path]):
             Mask image file path, if not None mask images will be added to
             the webdataset.
-        
+
     Returns:
         int: Updated dataset index after processing all rows in `cells_table`.
     """
     im_data = tiff.imread(tif_image_path)
-    im_data = np.asarray(im_data)
 
     if mask_file_path is not None:
         mask_data = tiff.imread(mask_file_path)
-        mask_data = np.asarray(mask_data, dtype=np.bool)
     else:
         mask_data = None
 
-    if im_data.dtype != np.uint16:
-        im_data = im_data.astype(np.uint16)
-
+    num_filtered = 0
     for _, row in cells_table.iterrows():
         if pbar is not None:
             pbar.update()
@@ -76,6 +72,7 @@ def _process_image_path(
             filter_edit_distance is not None
             and row["editDistance"] > filter_edit_distance
         ):
+            num_filtered += 1
             continue
 
         if min_barcodes is not None:
@@ -88,6 +85,7 @@ def _process_image_path(
             )
 
             if num_barcodes < min_barcodes:
+                num_filtered += 1
                 continue
 
         sample_idx = int(row["file_row_index"])
@@ -112,7 +110,7 @@ def _process_image_path(
         sink.write(curr_sample)
         curr_dataset_idx += 1
 
-    return curr_dataset_idx
+    return curr_dataset_idx, num_filtered
 
 
 def make_dataset(
@@ -121,7 +119,7 @@ def make_dataset(
     output_dir: str | pathlib.Path,
     adjust_path: bool = True,
     filter_cell_profiler: bool = True,
-    n_shards: int = 10,
+    max_samples_per_shard: int = 150000,
     log_file_path: Optional[str | pathlib.Path] = None,
     add_masks: bool = True,
 ) -> None:
@@ -143,8 +141,8 @@ def make_dataset(
             Whether to strip 'phenotyping/output/' from file paths.
         filter_cell_profiler (bool):
             Whether to drop columns that start with uppercase (CellProfiler).
-        n_shards (int):
-            Number of shards to split the dataset into.
+       max_samples_per_shard (int):
+            Maximum number of samples per shard
         add_mask (bool):
             Whether to add mask images to webdatset
     """
@@ -168,7 +166,6 @@ def make_dataset(
         raise ValueError(f"Unsupported cell file format: {cell_file_path.suffix}")
 
     n_samples = len(cell_df)
-    max_samples_per_shard = math.ceil(n_samples / n_shards)
     logging.info("Loaded %d samples", n_samples)
 
     if filter_cell_profiler:
@@ -211,14 +208,20 @@ def make_dataset(
                 else full_image_path.parent / "mask_images_100.tif"
             )
 
-            curr_dataset_idx = _process_image_path(
+            next_dataset_idx, num_filtered = _process_image_path(
                 sink,
                 cell_df_filtered,
                 full_image_path,
                 curr_dataset_idx,
                 pbar=pbar,
-                mask_file_path=mask_file_path
+                mask_file_path=mask_file_path,
             )
+
+            logging.info(
+                "Processed %d image slices", next_dataset_idx - curr_dataset_idx
+            )
+            logging.info("Filtered %d image slices", num_filtered)
+            curr_dataset_idx = next_dataset_idx
 
 
 def main() -> None:

@@ -17,7 +17,7 @@ from visseqsnip.make_webdataset import (
 )
 
 
-def create_dummy_tiff(path, shape=(1, 3, 2, 2), dtype=np.uint8):
+def create_dummy_tiff(path, shape=(1, 3, 2, 2), dtype=np.uint16):
     data = np.arange(np.prod(shape), dtype=dtype).reshape(shape)
     tiff.imwrite(str(path), data)
     return data
@@ -48,9 +48,10 @@ def test__process_image_path_basic(tmp_path):
     pattern = str(shards_dir / "shard-%06d.tar")
 
     with wds.ShardWriter(pattern, maxcount=10) as sink:
-        count = _process_image_path(sink, df, tif_path, curr_dataset_idx=5)
+        count, num_filtered = _process_image_path(sink, df, tif_path, curr_dataset_idx=5)
     # Index should advance by 1 from starting index
     assert count == 6
+    assert num_filtered == 0
 
     files = sorted(glob.glob(str(shards_dir / "shard-*.tar")))
     assert files
@@ -88,8 +89,9 @@ def test__process_image_path_filters(tmp_path):
     out1.mkdir()
     pattern1 = str(out1 / "shard-%06d.tar")
     with wds.ShardWriter(pattern1, maxcount=1) as sink:
-        c1 = _process_image_path(sink, df1, tif_path, 0, filter_edit_distance=1)
+        c1, num_filtered = _process_image_path(sink, df1, tif_path, 0, filter_edit_distance=1)
     assert c1 == 0
+    assert num_filtered == 1
     shards = glob.glob(str(out1 / "shard-*.tar"))
 
     # Empty dataset raises value error
@@ -108,8 +110,9 @@ def test__process_image_path_filters(tmp_path):
     out2.mkdir()
     pattern2 = str(out2 / "shard-%06d.tar")
     with wds.ShardWriter(pattern2, maxcount=1) as sink:
-        c2 = _process_image_path(sink, df2, tif_path, 0, min_barcodes=5)
+        c2, num_filtered = _process_image_path(sink, df2, tif_path, 0, min_barcodes=5)
     assert c2 == 0
+    assert num_filtered == 1
     shards = glob.glob(str(out2 / "shard-*.tar"))
 
     # Empty dataset raises value error
@@ -132,10 +135,11 @@ def test__process_image_path_combined_filters(tmp_path):
     out.mkdir()
     pattern = str(out / "shard-%06d.tar")
     with wds.ShardWriter(pattern, maxcount=1) as sink:
-        cnt = _process_image_path(
+        cnt, num_filtered = _process_image_path(
             sink, df, tif_path, 0, filter_edit_distance=1, min_barcodes=5
         )
     assert cnt == 0
+    assert num_filtered == 1
     shards = glob.glob(str(out / "shard-*.tar"))
 
     # Empty dataset raises value error
@@ -159,8 +163,9 @@ def test__process_image_path_with_mask(tmp_path):
     outm.mkdir()
     pattern_m = str(outm / "m-%06d.tar")
     with wds.ShardWriter(pattern_m, maxcount=1) as sink:
-        cnt = _process_image_path(sink, df, tif_path, 0, mask_file_path=mask_path)
+        cnt, num_filtered = _process_image_path(sink, df, tif_path, 0, mask_file_path=mask_path)
     assert cnt == 1
+    assert num_filtered == 0
 
     files = glob.glob(str(outm / "m-*.tar"))
     dataset = wds.WebDataset(files)
@@ -198,7 +203,7 @@ def test_make_dataset_parquet_and_filters(tmp_path):
         output_dir=out,
         adjust_path=True,
         filter_cell_profiler=True,
-        n_shards=1,
+        max_samples_per_shard=1,
         log_file_path=None,
         add_masks=False,
     )
@@ -219,6 +224,6 @@ def test_make_dataset_unsupported_format(tmp_path):
             cell_file_path=badfile,
             phenotyping_root_dir=tmp_path,
             output_dir=tmp_path / "o",
-            n_shards=1,
+            max_samples_per_shard=1,
             add_masks=False,
         )
