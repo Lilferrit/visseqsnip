@@ -217,13 +217,15 @@ def make_dataset(
                 mask_file_path=mask_file_path,
             )
 
-            logging.info(
-                "Wrote %d image samples", next_dataset_idx - curr_dataset_idx
-            )
+            logging.info("Wrote %d image samples", next_dataset_idx - curr_dataset_idx)
             logging.info("Filtered %d samples", num_filtered)
             curr_dataset_idx = next_dataset_idx
 
-    logging.info("Done - wrote %d total samples.", curr_dataset_idx)
+    logging.info(
+        "Done - wrote %d total samples, filtered %d samples.",
+        curr_dataset_idx,
+        n_samples - curr_dataset_idx,
+    )
 
 
 def main() -> None:

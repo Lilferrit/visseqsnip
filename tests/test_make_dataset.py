@@ -48,7 +48,9 @@ def test__process_image_path_basic(tmp_path):
     pattern = str(shards_dir / "shard-%06d.tar")
 
     with wds.ShardWriter(pattern, maxcount=10) as sink:
-        count, num_filtered = _process_image_path(sink, df, tif_path, curr_dataset_idx=5)
+        count, num_filtered = _process_image_path(
+            sink, df, tif_path, curr_dataset_idx=5
+        )
     # Index should advance by 1 from starting index
     assert count == 6
     assert num_filtered == 0
@@ -89,7 +91,9 @@ def test__process_image_path_filters(tmp_path):
     out1.mkdir()
     pattern1 = str(out1 / "shard-%06d.tar")
     with wds.ShardWriter(pattern1, maxcount=1) as sink:
-        c1, num_filtered = _process_image_path(sink, df1, tif_path, 0, filter_edit_distance=1)
+        c1, num_filtered = _process_image_path(
+            sink, df1, tif_path, 0, filter_edit_distance=1
+        )
     assert c1 == 0
     assert num_filtered == 1
     shards = glob.glob(str(out1 / "shard-*.tar"))
@@ -163,7 +167,9 @@ def test__process_image_path_with_mask(tmp_path):
     outm.mkdir()
     pattern_m = str(outm / "m-%06d.tar")
     with wds.ShardWriter(pattern_m, maxcount=1) as sink:
-        cnt, num_filtered = _process_image_path(sink, df, tif_path, 0, mask_file_path=mask_path)
+        cnt, num_filtered = _process_image_path(
+            sink, df, tif_path, 0, mask_file_path=mask_path
+        )
     assert cnt == 1
     assert num_filtered == 0
 
