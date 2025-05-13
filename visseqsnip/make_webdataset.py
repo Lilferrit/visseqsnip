@@ -218,10 +218,12 @@ def make_dataset(
             )
 
             logging.info(
-                "Processed %d image slices", next_dataset_idx - curr_dataset_idx
+                "Wrote %d image samples", next_dataset_idx - curr_dataset_idx
             )
-            logging.info("Filtered %d image slices", num_filtered)
+            logging.info("Filtered %d samples", num_filtered)
             curr_dataset_idx = next_dataset_idx
+
+    logging.info("Done - wrote %d total samples.", curr_dataset_idx)
 
 
 def main() -> None:
