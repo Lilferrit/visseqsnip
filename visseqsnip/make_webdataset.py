@@ -104,7 +104,7 @@ def _process_image_path(
             for channel_name, channel_idx in MASK_CHANNELS.items():
                 curr_channel_data = curr_mask[channel_idx]
                 curr_sample[f"{channel_name}_mask.png"] = PIL.Image.fromarray(
-                    curr_channel_data, mode="1"
+                    curr_channel_data, mode="L"
                 )
 
         sink.write(curr_sample)

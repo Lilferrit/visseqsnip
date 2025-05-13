@@ -180,7 +180,7 @@ def test__process_image_path_with_mask(tmp_path):
     for mch in MASK_CHANNELS:
         key = f"{mch}_mask.png"
         img = PIL.Image.open(io.BytesIO(sample[key]))
-        assert img.mode == "1"
+        assert img.mode == "L"
 
 
 def test_make_dataset_parquet_and_filters(tmp_path):
